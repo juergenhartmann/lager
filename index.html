@@ -88,7 +88,8 @@ textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:6px;
 <div id="pv" hidden style="background:#f2c200;color:#1f2a33;text-align:center;padding:8px;font-weight:600;cursor:pointer">Monteur-Ansicht · Tippen zum Beenden</div>
 <main id="app"><div class="card mute">Lade …</div></main>
 <div id="camp" hidden style="position:fixed;left:0;right:0;bottom:0;background:#000;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));z-index:8"><video id="vid" playsinline muted style="width:100%;height:28vh;object-fit:cover;border-radius:8px"></video><button class="btn ghost" id="cx" style="margin-top:6px;color:#fff;border-color:#888">Kamera schließen</button></div>
-<script>
+<script>const APPV="1.1 (28.10.)";
+
 /* ===== Verbindung zu Supabase (ersetzt die Claude-Datenbank) ===== */
 const RECOVERY=/type=recovery/.test(location.hash);
 const SB_URL="https://whfeipnyzffrejbakweb.supabase.co";
@@ -186,6 +187,15 @@ function parseLabel(t){const L=String(t).split(/\n/).map(x=>x.replace(/[|\[\]{}]
   if(!parts.length&&NR.test(l))continue;if((l.match(/[A-Za-zÄÖÜäöüß]/g)||[]).length<2)continue;parts.push(l)}
  const ev=parts.slice(0,4).reduce((a,p)=>a?(/-$/.test(a)?a+p:a+" "+p):p,"");
  return{ev,on}}
+
+/* Liest Auftragsnummer und Veranstaltung über Zeilengröße und Erkennungssicherheit */
+function parseLabelData(d){const NR=/(\d{5,9})\s?[-–—]\s?(\d{1,3})(?!\d)/,fb=parseLabel(d.text||"");
+ const wh=w=>w.bbox.y1-w.bbox.y0,lines=(d.lines||[]).map(l=>{const ws=(l.words||[]).filter(w=>w.confidence>=45&&/[A-Za-zÄÖÜäöüß0-9]/.test(w.text));return{ws,t:ws.map(w=>w.text).join(" ").trim(),y0:l.bbox.y0,y1:l.bbox.y1,h:Math.max(0,...ws.map(wh)),raw:l.text||""}}).filter(l=>l.t);
+ const nl=lines.find(l=>NR.test(l.t)&&!/telefon|tel\.|\+43|fax/i.test(l.raw));if(!nl)return fb;
+ const m=nl.t.match(NR),on=m[1]+"-"+m[2];
+ const parts=lines.filter(l=>l.y0>nl.y0+nl.h*.5).map(l=>l.ws.filter(w=>wh(w)>=nl.h*.6&&w.confidence>=60).map(w=>w.text).join(" ")).map(t=>t.replace(/^(projekt|veranstaltung)\s*[:.]?\s*/i,"").replace(/gewicht\s*:?/ig,"").replace(/\bkg\b/ig,"").replace(/[^A-Za-zÄÖÜäöüß0-9&.,'\/\- ]/g,"").replace(/\s+/g," ").trim()).filter(t=>(t.match(/[A-Za-zÄÖÜäöüß]/g)||[]).length>=2).slice(0,4).map(t=>t.charAt(0).toUpperCase()+t.slice(1));
+ const ev=parts.reduce((a,p)=>a?(/-$/.test(a)?a+p:a+" "+p):p,"");
+ return{on,ev:ev||fb.ev}}
 </script>
 <script>
 let db,user,me,owner=false,realOwner=false,lists=[],art={},names={},view="start",cur=null,pendQ=null,stream=null,timer=null,last="",draft={mode:"bleibt"};
@@ -374,7 +384,7 @@ function startView(){$("#t").textContent="Hauptseite";
   T("defnew",'<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z"/></svg>','Defekt melden',od.length+(od.length===1?' offener Defekt':' offene Defekte')+(ou?', davon '+ou+' dringend':''),ou?'!':'')+
   T("infonew",'<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/><path d="M9 11h6M9 14h4"/></svg>','Info an das Lager',owner?ui+' ungelesen':'Nachricht mit Foto ans Lager',owner&&ui?ui:'')+
   (canLager()?T("ret",'<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h12a5 5 0 0 1 0 10h-3"/><path d="M7 6l-4 4 4 4"/></svg>','Retourschein',rets.length+(rets.length===1?' gespeicherter Schein':' gespeicherte Scheine'),''):'')+
- '</div>'+(owner?'<div style="text-align:center;margin-top:24px"><button class="btn ghost s" data-g="art">Einstellungen'+(pendingN()?' <span class="hc" style="display:inline-grid;margin-left:6px">'+pendingN()+'</span>':'')+'</button></div>':'')+'<div style="text-align:center;margin-top:10px"><button class="btn ghost s" id="lgo">Abmelden</button></div>';
+ '</div>'+(owner?'<div style="text-align:center;margin-top:24px"><button class="btn ghost s" data-g="art">Einstellungen'+(pendingN()?' <span class="hc" style="display:inline-grid;margin-left:6px">'+pendingN()+'</span>':'')+'</button></div>':'')+'<div style="text-align:center;margin-top:10px"><button class="btn ghost s" id="lgo">Abmelden</button></div><div class="mute" style="text-align:center;font-size:12px;margin-top:14px">Version '+APPV+'</div>';
  document.querySelectorAll("[data-g]").forEach(b=>b.onclick=()=>{const v=b.dataset.g;if(v==="defnew")dpho=null;if(v==="infonew")ipho=null;go(v)});$("#lgo").onclick=()=>ask("Wirklich abmelden?",()=>SB.auth.signOut())}
 function editList(c){const w=c.mode==="weiter",o=document.createElement("div");o.className="ov";
  o.innerHTML='<div class="card" style="width:100%;max-width:380px;margin:0"><b>Veranstaltung bearbeiten</b><div style="height:8px"></div><label class="mute">'+(w?"Von Veranstaltung":"Veranstaltung")+'</label><input id="ee1"><label class="mute">Auftragsnummer</label><input id="eo1">'+(w?'<label class="mute">Zu Veranstaltung</label><input id="ee2"><label class="mute">Auftragsnummer (Ziel)</label><input id="eo2">':'')+'<div class="row"><button class="btn" id="esv">Speichern</button><button class="btn ghost" id="ecn">Abbrechen</button></div></div>';
@@ -538,7 +548,7 @@ async function rAutoSave(){const r=rets.find(x=>x.id===rs.id),done=()=>{curRet=r
  try{await db.doc("retour/"+rs.id).update({itemsJson:JSON.stringify(rs.items),mod:me,modT:Date.now()});done();toast("Retourschein gespeichert",1)}catch(x){errBox("Speichern fehlgeschlagen. Bitte nochmal versuchen.")}}
 async function rCamBind(){const b=$("#rcam"),f=$("#rcamf");if(!b)return;b.hidden=false;b.onclick=()=>f.click();
  f.onchange=async()=>{const file=f.files[0];f.value="";if(!file)return;const t=$("#rcamt");b.disabled=true;t.textContent="Aufkleber wird gelesen …";
-  try{await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");const img=await rShrink(file);const res=await Tesseract.recognize(img,"deu");const r=parseLabel(res.data.text);
+  try{await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");const img=await rShrink(file);const res=await Tesseract.recognize(img,"deu");const r=parseLabelData(res.data);
    if(!r.ev&&!r.on)errBox("Auf dem Foto war nichts lesbar. Bitte nochmal mit mehr Licht und gerade von vorne fotografieren.");
    else{if(r.ev&&$("#rev"))$("#rev").value=r.ev;if(r.on&&$("#rord"))$("#rord").value=r.on;toast("Bitte kurz kontrollieren",1)}}
   catch(e){console.error(e);errBox("Der Aufkleber konnte nicht gelesen werden. Bitte nochmal versuchen oder von Hand eintippen.")}
