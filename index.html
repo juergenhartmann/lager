@@ -88,7 +88,7 @@ textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:6px;
 <div id="pv" hidden style="background:#f2c200;color:#1f2a33;text-align:center;padding:8px;font-weight:600;cursor:pointer">Monteur-Ansicht · Tippen zum Beenden</div>
 <main id="app"><div class="card mute">Lade …</div></main>
 <div id="camp" hidden style="position:fixed;left:0;right:0;bottom:0;background:#000;padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));z-index:8"><video id="vid" playsinline muted style="width:100%;height:28vh;object-fit:cover;border-radius:8px"></video><button class="btn ghost" id="cx" style="margin-top:6px;color:#fff;border-color:#888">Kamera schließen</button></div>
-<script>const APPV="1.1 (28.10.)";
+<script>const APPV="1.2 (28.10.)";
 
 /* ===== Verbindung zu Supabase (ersetzt die Claude-Datenbank) ===== */
 const RECOVERY=/type=recovery/.test(location.hash);
@@ -195,7 +195,18 @@ function parseLabelData(d){const NR=/(\d{5,9})\s?[-–—]\s?(\d{1,3})(?!\d)/,fb
  const m=nl.t.match(NR),on=m[1]+"-"+m[2];
  const parts=lines.filter(l=>l.y0>nl.y0+nl.h*.5).map(l=>l.ws.filter(w=>wh(w)>=nl.h*.6&&w.confidence>=60).map(w=>w.text).join(" ")).map(t=>t.replace(/^(projekt|veranstaltung)\s*[:.]?\s*/i,"").replace(/gewicht\s*:?/ig,"").replace(/\bkg\b/ig,"").replace(/[^A-Za-zÄÖÜäöüß0-9&.,'\/\- ]/g,"").replace(/\s+/g," ").trim()).filter(t=>(t.match(/[A-Za-zÄÖÜäöüß]/g)||[]).length>=2).slice(0,4).map(t=>t.charAt(0).toUpperCase()+t.slice(1));
  const ev=parts.reduce((a,p)=>a?(/-$/.test(a)?a+p:a+" "+p):p,"");
- return{on,ev:ev||fb.ev}}
+ return{on,ev}}
+
+/* Bild für die Texterkennung vorbereiten: verkleinern, grau, Kontrast strecken */
+function ocrPrep(file,W){return new Promise((ok,no)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>{const k=Math.min(1,W/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);const g=c.getContext("2d",{willReadFrequently:true});g.drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);
+ const d=g.getImageData(0,0,c.width,c.height),a=d.data,n=a.length/4,H=new Uint32Array(256),Y=new Uint8Array(n);for(let i=0;i<n;i++){const y=(a[i*4]*299+a[i*4+1]*587+a[i*4+2]*114)/1000|0;Y[i]=y;H[y]++}
+ let lo=0,hi=255,acc=0;const cut=n*.02;while(lo<255&&(acc+=H[lo])<cut)lo++;acc=0;while(hi>0&&(acc+=H[hi])<cut)hi--;const sp=Math.max(1,hi-lo);
+ for(let i=0;i<n;i++){const v=Math.max(0,Math.min(255,(Y[i]-lo)*255/sp));a[i*4]=a[i*4+1]=a[i*4+2]=v}g.putImageData(d,0,0);c.toBlob(b=>b?ok(b):no(new Error("img")),"image/jpeg",.9)};im.onerror=()=>{URL.revokeObjectURL(u);no(new Error("img"))};im.src=u})}
+let TW=null;
+const ocrScore=r=>(r.on?10:0)+(r.ev.match(/[A-Za-zÄÖÜäöüß]/g)||[]).length-(/-$/.test(r.ev)?6:0);
+async function readLabel(file){await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");if(!TW)TW=await Tesseract.createWorker("deu");
+ let best=null;for(const W of [1000,1250,800]){const res=await TW.recognize(await ocrPrep(file,W)),r=parseLabelData(res.data);if(!best||ocrScore(r)>ocrScore(best))best=r;if(best.on&&best.ev&&!/-$/.test(best.ev))break}
+ return best}
 </script>
 <script>
 let db,user,me,owner=false,realOwner=false,lists=[],art={},names={},view="start",cur=null,pendQ=null,stream=null,timer=null,last="",draft={mode:"bleibt"};
@@ -548,7 +559,7 @@ async function rAutoSave(){const r=rets.find(x=>x.id===rs.id),done=()=>{curRet=r
  try{await db.doc("retour/"+rs.id).update({itemsJson:JSON.stringify(rs.items),mod:me,modT:Date.now()});done();toast("Retourschein gespeichert",1)}catch(x){errBox("Speichern fehlgeschlagen. Bitte nochmal versuchen.")}}
 async function rCamBind(){const b=$("#rcam"),f=$("#rcamf");if(!b)return;b.hidden=false;b.onclick=()=>f.click();
  f.onchange=async()=>{const file=f.files[0];f.value="";if(!file)return;const t=$("#rcamt");b.disabled=true;t.textContent="Aufkleber wird gelesen …";
-  try{await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");const img=await rShrink(file);const res=await Tesseract.recognize(img,"deu");const r=parseLabelData(res.data);
+  try{const r=await readLabel(file);
    if(!r.ev&&!r.on)errBox("Auf dem Foto war nichts lesbar. Bitte nochmal mit mehr Licht und gerade von vorne fotografieren.");
    else{if(r.ev&&$("#rev"))$("#rev").value=r.ev;if(r.on&&$("#rord"))$("#rord").value=r.on;toast("Bitte kurz kontrollieren",1)}}
   catch(e){console.error(e);errBox("Der Aufkleber konnte nicht gelesen werden. Bitte nochmal versuchen oder von Hand eintippen.")}
